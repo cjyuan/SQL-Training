@@ -22,8 +22,10 @@ BEGIN
 END;
 $$;
 
+
+
 -- Returns a normalised and simplified rational number  
-CREATE OR REPLACE FUNCTION rational(n NUMERIC, d NUMERIC)
+CREATE OR REPLACE FUNCTION rational_normalize(n NUMERIC, d NUMERIC)
 RETURNS rational
 LANGUAGE plpgsql IMMUTABLE STRICT AS $$
 DECLARE
@@ -59,6 +61,17 @@ BEGIN
     RETURN (n / g, d / g)::rational;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION rational_normalize(rational)
+RETURNS rational AS $$
+  SELECT rational_normalize($1.num, $1.den);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION rational(n NUMERIC, d NUMERIC)
+RETURNS rational AS $$
+  SELECT rational_normalize(n, d);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
 
 CREATE FUNCTION rational_to_text(r rational)
 RETURNS text AS $$
@@ -148,7 +161,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 CREATE CAST (rational AS numeric)
 WITH FUNCTION rational_to_numeric(rational)
-AS ASSIGNMENT;
+AS IMPLICIT;
 -- Note: Works when inserting into a table column of type rational or when explicitly 
 -- casting, but won't "guess" during complex math operations. This is generally safer
 -- for production systems.
@@ -163,7 +176,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 CREATE CAST (int AS rational)
 WITH FUNCTION int_to_rational(int)
-AS ASSIGNMENT;
+AS IMPLICIT;
 
 CREATE OR REPLACE FUNCTION rational_to_int(r rational)
 RETURNS int AS $$
@@ -172,7 +185,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 CREATE CAST (rational AS int)
 WITH FUNCTION rational_to_int(rational)
-AS ASSIGNMENT;
+AS IMPLICIT;
 
 
 -- to/from BIGINT
@@ -184,7 +197,7 @@ $$ LANGUAGE SQL IMMUTABLE STRICT;
 
 CREATE CAST (bigint AS rational)
 WITH FUNCTION bigint_to_rational(bigint)
-AS ASSIGNMENT;
+AS IMPLICIT;
 
 CREATE OR REPLACE FUNCTION rational_to_bigint(r rational)
 RETURNS bigint AS $$
@@ -196,3 +209,294 @@ WITH FUNCTION rational_to_bigint(rational)
 AS ASSIGNMENT;
 
 --------------------------------------------
+CREATE FUNCTION rational_add(r1 rational, r2 rational)
+RETURNS rational AS $$
+    SELECT rational((r1).num * (r2.den) + (r1).den * (r2).num, (r1).den * (r2).den);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_sub(r1 rational, r2 rational)
+RETURNS rational AS $$
+    SELECT rational((r1).num * (r2.den) - (r1).den * (r2).num, (r1).den * (r2).den);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_mul(r1 rational, r2 rational)
+RETURNS rational AS $$
+    SELECT rational((r1).num * (r2).num, (r1).den * (r2).den);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_div(r1 rational, r2 rational)
+RETURNS rational AS $$
+    SELECT rational((r1).num * (r2).den, (r1).den * (r2).num);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_mod(r1 rational, r2 rational)
+RETURNS rational AS $$
+DECLARE
+    q rational;
+    q_int numeric;
+BEGIN
+    -- q_int = trunc(r1 / r2);
+    q = r1 / r2;
+    q_int = trunc(q.num / q.den);
+    
+    -- r1 - r2 * q_int
+    return r1 - (r2 * rational(q_int,1));
+END;
+$$ LANGUAGE plpgsql IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_mod(r1 rational, r2 int)
+RETURNS rational AS $$
+  SELECT rational_mod(r1, rational(r2,1));
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR + (
+    leftarg = rational,
+    rightarg = rational,
+    function = rational_add,
+    commutator = +
+);
+
+CREATE OPERATOR - (
+    leftarg = rational,
+    rightarg = rational,
+    function = rational_sub
+);
+
+CREATE OPERATOR * (
+    leftarg = rational,
+    rightarg = rational,
+    function = rational_mul,
+    commutator = *
+);
+
+CREATE OPERATOR / (
+    leftarg = rational,
+    rightarg = rational,
+    function = rational_div
+);
+
+CREATE OPERATOR % (
+    leftarg = rational,
+    rightarg = rational,
+    function = rational_mod
+);
+
+CREATE OPERATOR % (
+    leftarg = rational,
+    rightarg = int,
+    function = rational_mod
+);
+
+
+CREATE FUNCTION rational_neg(r rational)
+RETURNS rational AS $$
+    SELECT rational(-(r).num, (r).den);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR - (
+    rightarg = rational,
+    function = rational_neg
+);
+
+
+--------------------------------------------
+CREATE FUNCTION rational_cmp_normalized(rational, rational)
+RETURNS integer AS $$
+    SELECT CASE 
+        WHEN ($1.num * $2.den) < ($2.num * $1.den) THEN -1
+        WHEN ($1.num * $2.den) > ($2.num * $1.den) THEN 1
+        ELSE 0
+    END;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_cmp(rational, rational)
+RETURNS integer AS $$
+    SELECT rational_cmp_normalized(rational_normalize($1), rational_normalize($2));
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_eq(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) = 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR = (
+    leftarg = rational, rightarg = rational,
+    function = rational_eq,
+    commutator = =, negator = <>
+);
+
+CREATE FUNCTION rational_ne(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) <> 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR <> (
+    leftarg = rational, rightarg = rational,
+    function = rational_ne,
+    commutator = <>, negator = =
+);
+
+CREATE FUNCTION rational_lt(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) < 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR < (
+    leftarg = rational, rightarg = rational,
+    function = rational_lt,
+    commutator = >, negator = >=
+);
+
+CREATE FUNCTION rational_gt(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) > 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR > (
+    leftarg = rational, rightarg = rational,
+    function = rational_gt,
+    commutator = <, negator = <=
+);
+
+CREATE FUNCTION rational_lt_or_equal(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) <= 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR <= (
+    leftarg = rational, rightarg = rational,
+    function = rational_lt_or_equal,
+    commutator = >=, negator = >
+);
+
+CREATE FUNCTION rational_gt_or_equal(rational, rational) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) >= 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR >= (
+    leftarg = rational, rightarg = rational,
+    function = rational_gt_or_equal,
+    commutator = <=, negator = <
+);
+
+------------
+CREATE FUNCTION rational_cmp(rational, int)
+RETURNS integer AS $$
+    SELECT rational_cmp_normalized(rational_normalize($1), rational($2, 1));
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION rational_eq(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) = 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR = (
+    leftarg = rational, rightarg = int,
+    function = rational_eq,
+    commutator = =, negator = <>
+);
+
+CREATE FUNCTION rational_ne(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) <> 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR <> (
+    leftarg = rational, rightarg = int,
+    function = rational_ne,
+    commutator = <>, negator = =
+);
+
+CREATE FUNCTION rational_lt(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) < 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR < (
+    leftarg = rational, rightarg = int,
+    function = rational_lt,
+    commutator = >, negator = >=
+);
+
+CREATE FUNCTION rational_gt(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) > 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR > (
+    leftarg = rational, rightarg = int,
+    function = rational_gt,
+    commutator = <, negator = <=
+);
+
+CREATE FUNCTION rational_lt_or_equal(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) <= 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR <= (
+    leftarg = rational, rightarg = int,
+    function = rational_lt_or_equal,
+    commutator = >=, negator = >
+);
+
+CREATE FUNCTION rational_gt_or_equal(rational, int) RETURNS boolean AS $$
+    SELECT rational_cmp($1, $2) >= 0;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR >= (
+    leftarg = rational, rightarg = int,
+    function = rational_gt_or_equal,
+    commutator = <=, negator = <
+);
+
+CREATE FUNCTION numerator(rational)
+RETURNS numeric AS $$
+    SELECT (rational_normalize($1)).num;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION denominator(rational)
+RETURNS numeric AS $$
+    SELECT (rational_normalize($1)).den;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+
+CREATE FUNCTION numerator(int)
+RETURNS numeric AS $$
+    SELECT $1;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION denominator(int)
+RETURNS numeric AS $$
+    SELECT 1;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION numerator(text)
+RETURNS numeric AS $$
+    SELECT ($1::rational).num;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE FUNCTION denominator(text)
+RETURNS numeric AS $$
+    SELECT ($1::rational).den;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE OPERATOR ?/- (
+    rightarg = integer,
+    function = numerator
+);
+
+CREATE OPERATOR ?/- (
+    rightarg = rational,
+    function = numerator
+);
+
+CREATE OPERATOR -/? (
+    rightarg = integer,
+    function = denominator
+);
+
+CREATE OPERATOR -/? (
+    rightarg = rational,
+    function = denominator
+);
+
+CREATE OPERATOR ?/- (
+    rightarg = text,
+    function = numerator
+);
+
+CREATE OPERATOR -/? (
+    rightarg = text,
+    function = denominator
+);
