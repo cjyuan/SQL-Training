@@ -125,4 +125,71 @@ CREATE CAST (varchar AS rational)
 WITH FUNCTION text_to_rational(text)
 AS IMPLICIT;
 
+------------------ to/from numbers --------------------
 
+-- to/from NUMERIC
+CREATE OR REPLACE FUNCTION numeric_to_rational(num numeric)
+RETURNS rational AS $$
+    SELECT rational(num, 1);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE CAST (numeric AS rational)
+WITH FUNCTION numeric_to_rational(numeric)
+AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION rational_to_numeric(r rational)
+RETURNS numeric AS $$
+    SELECT ((r).num / (r).den)::numeric;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+
+CREATE CAST (rational AS numeric)
+WITH FUNCTION rational_to_numeric(rational)
+AS ASSIGNMENT;
+-- Note: Works when inserting into a table column of type rational or when explicitly 
+-- casting, but won't "guess" during complex math operations. This is generally safer
+-- for production systems.
+
+
+-- to/from INT
+
+CREATE OR REPLACE FUNCTION int_to_rational(num int)
+RETURNS rational AS $$
+    SELECT rational(num, 1);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE CAST (int AS rational)
+WITH FUNCTION int_to_rational(int)
+AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION rational_to_int(r rational)
+RETURNS int AS $$
+    SELECT TRUNC((r).num / (r).den)::INT;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE CAST (rational AS int)
+WITH FUNCTION rational_to_int(rational)
+AS ASSIGNMENT;
+
+
+-- to/from BIGINT
+
+CREATE OR REPLACE FUNCTION bigint_to_rational(num bigint)
+RETURNS rational AS $$
+    SELECT rational(num, 1);
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE CAST (bigint AS rational)
+WITH FUNCTION bigint_to_rational(bigint)
+AS ASSIGNMENT;
+
+CREATE OR REPLACE FUNCTION rational_to_bigint(r rational)
+RETURNS bigint AS $$
+    SELECT TRUNC((r).num / (r).den)::BIGINT;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
+
+CREATE CAST (rational AS bigint)
+WITH FUNCTION rational_to_bigint(rational)
+AS ASSIGNMENT;
+
+--------------------------------------------
