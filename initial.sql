@@ -63,6 +63,9 @@ $$;
 CREATE FUNCTION rational_to_text(r rational)
 RETURNS text AS $$
 BEGIN
+    -- Has to normlise the rational number here to overcome rational created as '(15, 5)'::rational in the test
+    r = rational(r.num, r.den); 
+                               
     IF r.den = 1 THEN
         RETURN r.num::text;
     END IF;
